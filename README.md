@@ -1,0 +1,1 @@
+# Korpus_Vowel_Bahasa_Indonesia
