@@ -58,11 +58,17 @@ def load_backend(use_stubs=False):
                                dtw=s.dtw_distance, fit_gaussian=s.fit_gaussian, nll=s.nll)
     try:
         from src.dtw import dtw_distance
-        from src.features import extract_mfcc39
+        from src.features import extract_mfcc_39
         from src.gaussian import fit_gaussian, nll
+        from src.preprocessing import load_audio
         from src.template import build_averaged_template
     except ImportError as e:
         raise ImportError(f"Kode P1-P3 belum lengkap ({e}). Untuk sementara jalankan dengan --use-stubs.") from e
+    def extract_mfcc39(path):
+        # konfigurasi sama dengan main.ipynb: WINLEN=0.025, WINSTEP=0.010, NUM_CEP=13, N_FFT=512
+        signal, sample_rate = load_audio(path, EXPECTED_SAMPLE_RATE)
+        return extract_mfcc_39(signal, sample_rate, 0.025, 0.010, 13, 512)
+
     return SimpleNamespace(name="p1-p3", extract=extract_mfcc39, build_template=build_averaged_template,
                            dtw=dtw_distance, fit_gaussian=fit_gaussian, nll=nll)
 
