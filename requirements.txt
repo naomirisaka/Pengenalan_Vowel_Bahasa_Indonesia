@@ -1,0 +1,9 @@
+numpy
+pandas
+scipy
+soundfile
+python_speech_features
+librosa
+matplotlib
+seaborn
+scikit-learn
