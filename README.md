@@ -46,7 +46,7 @@ Ekstraksi fitur dilakukan menggunakan `python_speech_features` melalui modul `sr
 - **13 fitur delta** (turunan pertama);
 - **13 fitur delta-delta** (turunan kedua);
 
-sehingga setiap frame menghasilkan vektor fitur **39 dimensi**. Fitur dinormalisasi per rekaman (*zero mean, unit variance*). Konfigurasi: window length 25 ms, window step 10 ms, `nfft=512`, 26 filter Mel, pre-emphasis 0.97, dan cepstral lifter 22.
+sehingga setiap frame menghasilkan vektor fitur **39 dimensi**. Fitur tidak dinormalisasi per rekaman (`normalize=True` untuk mengaktifkan), karena normalisasi menghapus rata-rata spektrum yang menjadi ciri utama vowel tunggal. Konfigurasi: window length 25 ms, window step 10 ms, `nfft=512`, 26 filter Mel, pre-emphasis 0.97, dan cepstral lifter 22.
 
 ### 3. Sistem 1: DTW (Averaged Template)
 
