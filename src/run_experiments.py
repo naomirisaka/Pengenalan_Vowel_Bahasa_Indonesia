@@ -1,23 +1,3 @@
-"""Runner eksperimen (P4): menjalankan recognition untuk setiap skenario uji.
-
-Alur run_all():
-    scan_dataset -> check_dataset -> extract_all -> build_systems (sekali, hanya
-    dari data/template) -> run_scenario untuk tiap skenario -> results/predictions.csv
-
-Pemakaian:
-    python -m src.run_experiments
-    python -m src.run_experiments --scenarios closed_speaker --systems gaussian
-    python -m src.run_experiments --scenarios closed_recording closed_speaker open loso --systems dtw gaussian dtw_nn
-
-Fungsi P1-P3 yang dipanggil:
-    src.preprocessing.load_audio(path, sample_rate) -> (signal, sample_rate)
-    src.features.extract_mfcc_39(signal, sample_rate, ...) -> (T, 39)
-    src.template.build_averaged_template(list_of_(T_i, 39)) -> (T, 39)
-    src.dtw.dtw_distance(X, Y) -> float
-    src.gaussian.fit_gaussian(list_of_(T_i, 39)) -> model
-    src.gaussian.nll(X, model) -> float
-"""
-
 import argparse
 import hashlib
 import json
@@ -49,32 +29,35 @@ DEFAULT_SCENARIOS = ["closed_recording", "closed_speaker", "open"]
 SYSTEMS = ["dtw", "gaussian", "dtw_nn"]
 DEFAULT_SYSTEMS = ["dtw", "gaussian"]
 
-# Konvensi nama file: S{speaker}_{vowel}_{usage}_{condition}.wav, contoh S01_A_CS_HP.wav
+
 FILENAME_RE = re.compile(r"^(?P<speaker>[A-Za-z0-9]+)_(?P<vowel>[AIUEO])_(?P<usage>CR|CS|OS)_(?P<condition>[A-Za-z]+)\.wav$", re.IGNORECASE)
 EXPECTED_SAMPLE_RATE = 16000
-MAX_DURATION = 10.0  # detik; rekaman lebih panjang hampir pasti belum dipotong per vowel
+MAX_DURATION = 10.0
 
-# Konfigurasi MFCC, sama dengan main.ipynb
+
 WINLEN = 0.025
 WINSTEP = 0.010
 NUM_CEP = 13
 N_FFT = 512
 
 
+# Input : lokasi satu file audio
+# Output: fitur MFCC 39 dimensi per frame (setelah preprocessing)
 def extract_mfcc39(path):
-    """Preprocessing (P1) lalu MFCC 39 dimensi (P1) untuk satu file."""
     signal, sample_rate = load_audio(path, EXPECTED_SAMPLE_RATE)
     return extract_mfcc_39(signal, sample_rate, WINLEN, WINSTEP, NUM_CEP, N_FFT)
 
 
+# Input : -
+# Output: kumpulan fungsi ekstraksi fitur, pembuatan template, DTW, dan Gaussian
 def load_backend():
-    """Kumpulkan fungsi P1-P3 yang dipakai recognition."""
     return SimpleNamespace(extract=extract_mfcc39, build_template=build_averaged_template,
                            dtw=dtw_distance, fit_gaussian=fit_gaussian, nll=nll)
 
 
+# Input : folder dataset
+# Output: tabel semua file audio beserta skenario, speaker, vowel, kondisi, dan info audionya
 def scan_dataset(data_dir="data"):
-    """Daftar semua file .wav di data/ beserta label, skenario, hash, dan info audio."""
     rows = []
     for scenario, sub in SCENARIO_DIRS.items():
         for path in sorted((Path(data_dir) / sub).rglob("*.wav")):
@@ -98,12 +81,9 @@ def scan_dataset(data_dir="data"):
                                        "condition", "md5", "sample_rate", "channels", "duration"])
 
 
+# Input : tabel dataset, mode ketat (error menghentikan eksekusi atau tidak)
+# Output: daftar peringatan; berhenti dengan error jika data tidak valid
 def check_dataset(df, strict=True):
-    """Pastikan pengujian adil dan label benar. Error -> ValueError (kecuali strict=False).
-
-    Returns:
-        Daftar peringatan yang tidak menghentikan eksperimen.
-    """
     errors, warnings = [], []
     by = {s: df[df.scenario == s] for s in SCENARIO_DIRS}
     template = by["template"]
@@ -118,7 +98,6 @@ def check_dataset(df, strict=True):
     for f in df[(df.sample_rate != EXPECTED_SAMPLE_RATE) | (df.channels != 1)].path:
         warnings.append(f"Bukan {EXPECTED_SAMPLE_RATE} Hz mono (pastikan ekstraksi fitur menanganinya): {f}")
 
-    # Template: kelima vowel ada, dan speakernya sama untuk setiap vowel
     speakers_per_vowel = {v: set(template[template.vowel == v].speaker) for v in VOWELS}
     for v, spk in speakers_per_vowel.items():
         if not spk:
@@ -129,7 +108,6 @@ def check_dataset(df, strict=True):
         errors.append(f"Speaker template tidak sama di setiap vowel: { {v: sorted(s) for v, s in speakers_per_vowel.items()} }")
     template_speakers = set(template.speaker.dropna())
 
-    # File identik tidak boleh punya label berbeda atau muncul dua kali dalam satu skenario
     for md5, group in named.groupby("md5"):
         if group.vowel.nunique() > 1:
             errors.append(f"File identik dengan label vowel berbeda: {sorted(group.path)}")
@@ -137,19 +115,16 @@ def check_dataset(df, strict=True):
             if len(g) > 1:
                 errors.append(f"File identik muncul {len(g)}x di {scenario}: {sorted(g.path)}")
 
-    # Closed recording = rekaman template itu sendiri
     key = ["speaker", "vowel", "md5"]
     if set(map(tuple, by["closed_recording"][key].values)) != set(map(tuple, template[key].values)):
         errors.append("Isi test/closed/recording tidak identik dengan data/template")
 
-    # Closed speaker = speaker template, rekaman berbeda
     leaked = by["closed_speaker"][by["closed_speaker"].md5.isin(set(template.md5))]
     for f in leaked.path:
         errors.append(f"Data closed speaker identik dengan rekaman template: {f}")
     for spk in sorted(set(by["closed_speaker"].speaker.dropna()) - template_speakers):
         errors.append(f"Speaker {spk} di closed speaker tidak ada di template")
 
-    # Open = speaker di luar template
     for spk in sorted(set(by["open"].speaker.dropna()) & template_speakers):
         errors.append(f"Speaker {spk} di open juga ada di template (seharusnya speaker lain)")
 
@@ -164,8 +139,9 @@ def check_dataset(df, strict=True):
     return warnings + errors
 
 
+# Input : tabel file audio, fungsi ekstraksi fitur
+# Output: fitur MFCC setiap file (file identik hanya diekstrak sekali)
 def extract_all(df, extract_fn):
-    """Ekstraksi MFCC sekali per file; file identik (hash sama) hanya diekstrak sekali."""
     by_md5 = {}
     for path, md5 in zip(df.path, df.md5):
         if md5 not in by_md5:
@@ -173,8 +149,9 @@ def extract_all(df, extract_fn):
     return {path: by_md5[md5] for path, md5 in zip(df.path, df.md5)}
 
 
+# Input : data latih (rekaman template), fitur MFCC-nya, fungsi P1-P3, sistem yang dipakai
+# Output: model tiap vowel untuk setiap sistem (averaged template DTW, model Gaussian)
 def build_systems(train_df, feats, backend, systems=DEFAULT_SYSTEMS):
-    """Bangun model tiap sistem dari data latih (normalnya: hanya data/template)."""
     by_vowel = {v: [feats[p] for p in train_df[train_df.vowel == v].path] for v in VOWELS}
     builders = {
         "dtw": lambda: {v: backend.build_template(fs) for v, fs in by_vowel.items()},
@@ -191,6 +168,8 @@ RECOGNIZERS = {
 }
 
 
+# Input : data uji, fitur MFCC-nya, model tiap sistem, fungsi P1-P3, nama skenario
+# Output: hasil pengenalan setiap rekaman uji oleh setiap sistem (label asli, tebakan, skor)
 def _evaluate(test_df, feats, trained, backend, scenario):
     rows = []
     for item in test_df.itertuples():
@@ -215,12 +194,9 @@ def _evaluate(test_df, feats, trained, backend, scenario):
     return rows
 
 
+# Input : nama skenario uji, tabel dataset, fitur MFCC, model tiap sistem, fungsi P1-P3
+# Output: tabel hasil pengenalan untuk skenario tersebut
 def run_scenario(scenario, df, feats, trained, backend):
-    """Jalankan satu skenario uji dan kembalikan DataFrame prediksi.
-
-    "loso" (leave-one-speaker-out) melatih ulang tanpa satu speaker template,
-    lalu menguji data closed speaker milik speaker tersebut, bergiliran.
-    """
     if scenario == "loso":
         template, closed = df[df.scenario == "template"], df[df.scenario == "closed_speaker"]
         rows = []
@@ -232,8 +208,9 @@ def run_scenario(scenario, df, feats, trained, backend):
     return pd.DataFrame(rows)
 
 
+# Input : folder dataset, folder hasil, skenario dan sistem yang dijalankan, mode ketat
+# Output: tabel hasil pengenalan semua skenario, disimpan ke predictions.csv dan run_info.json
 def run_all(data_dir="data", out_dir="results", scenarios=None, systems=None, strict=True):
-    """Superset: jalankan seluruh pipeline pengujian dan simpan hasilnya."""
     scenarios = list(scenarios or DEFAULT_SCENARIOS)
     systems = list(systems or DEFAULT_SYSTEMS)
     backend = load_backend()
@@ -291,6 +268,8 @@ def run_all(data_dir="data", out_dir="results", scenarios=None, systems=None, st
     return results
 
 
+# Input : pilihan dari command line (folder data, folder hasil, skenario, sistem)
+# Output: menjalankan seluruh pengujian
 def main():
     parser = argparse.ArgumentParser(description="Jalankan skenario pengujian pengenalan vowel.")
     parser.add_argument("--data", default="data", help="folder dataset (default: data)")
