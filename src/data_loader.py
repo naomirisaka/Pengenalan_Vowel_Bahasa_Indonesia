@@ -9,13 +9,18 @@ def load_dataset(data_dir):
         match = re.match(pattern, file_path.name, re.IGNORECASE)
         if match:
             groups = match.groupdict()
+            
+            rel_path = file_path.relative_to(data_dir)
+            split = rel_path.parts[0]
+            
             records.append({
                 "file_path": str(file_path.resolve()),
                 "file_name": file_path.name,
                 "speaker": f"S{int(groups['speaker']):02d}",
                 "vowel": groups["vowel"].upper(),
                 "usage": groups["usage"].upper(),        # CR, CS, OS
-                "condition": groups["condition"].upper()  # N, HP, LP, SD, LD
+                "condition": groups["condition"].upper(),  # N, HP, LP, SD, LD
+                "split": split
             })
             
     df = pd.DataFrame(records)
