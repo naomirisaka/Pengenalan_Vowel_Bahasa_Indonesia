@@ -43,7 +43,7 @@ def load_predictions(path: str | Path = "results/predictions.csv") -> pd.DataFra
     if not path.exists():
         raise FileNotFoundError(
             f"File prediksi tidak ditemukan: {path}. "
-            "Jalankan `python -m src.run_experiments` (atau `--use-stubs`) terlebih dahulu."
+            "Jalankan `python -m src.run_experiments` terlebih dahulu."
         )
 
     df = pd.read_csv(path)
