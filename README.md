@@ -58,7 +58,7 @@ sehingga setiap frame menghasilkan vektor fitur **39 dimensi**. Fitur tidak dino
 ### 4. Sistem 2: Model Gaussian
 
 - Seluruh frame fitur dari data template per vowel digabungkan untuk mengestimasi distribusi Gaussian multivariat.
-- Setiap kelas vowel dimodelkan oleh **vektor mean 39 dimensi** dan **matriks kovarians 39 × 39** (diberi regularisasi diagonal `1e-3` untuk stabilitas numerik).
+- Setiap kelas vowel dimodelkan oleh **vektor mean 39 dimensi** dan **matriks kovarians 39 × 39** (korelasi antar dimensi disusutkan ke diagonalnya dengan `shrinkage=0.6` karena frame latih per vowel hanya 184-312, ditambah regularisasi diagonal `1e-3` untuk stabilitas numerik).
 - Skor input dihitung dari rata-rata **Negative Log-Likelihood (NLL)** per frame.
 - Vowel dengan **NLL terkecil** dipilih sebagai hasil prediksi.
 
