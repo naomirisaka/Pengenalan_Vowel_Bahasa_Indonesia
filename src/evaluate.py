@@ -34,8 +34,26 @@ SYSTEM_LABELS = {
 }
 AVERAGE_SCENARIOS = ["closed_recording", "closed_speaker", "open"]
 
-
-# --- Pemuatan dan Validasi ---
+CONDITIONS = ["N", "HP", "LP", "SD", "LD"]
+CONDITION_LABELS = {
+    "N": "Normal",
+    "HP": "High Pitch",
+    "LP": "Low Pitch",
+    "SD": "Short Duration",
+    "LD": "Long Duration",
+}
+CONDITION_GROUPS = {
+    "normal": ["N"],
+    "pitch": ["HP", "LP"],
+    "duration": ["SD", "LD"],
+    "all": None,
+}
+CONDITION_GROUP_LABELS = {
+    "normal": "Normal",
+    "pitch": "Variasi Pitch",
+    "duration": "Variasi Durasi",
+    "all": "Overall",
+}
 
 def load_predictions(path: str | Path = "results/predictions.csv") -> pd.DataFrame:
     """Baca dan validasi predictions.csv."""
@@ -63,6 +81,8 @@ def load_predictions(path: str | Path = "results/predictions.csv") -> pd.DataFra
     for col in ("speaker", "file", "condition"):
         if col in df.columns:
             df[col] = df[col].astype(str).str.strip()
+    if "condition" in df.columns:
+        df["condition"] = df["condition"].str.upper()
 
     unknown = (set(df["vowel_true"]) | set(df["pred"])) - set(VOWELS)
     if unknown:
@@ -118,6 +138,20 @@ def _scenario_label(value: str, labels: bool) -> str:
     return SCENARIO_LABELS.get(value, value) if labels else value
 
 
+def filter_condition(df: pd.DataFrame, group: str) -> pd.DataFrame:
+    """Ambil prediksi untuk satu kelompok kondisi (normal, pitch, duration, all)."""
+    if group not in CONDITION_GROUPS:
+        raise ValueError(
+            f"Kelompok kondisi tidak dikenal: {group!r}. Pilih dari {list(CONDITION_GROUPS)}"
+        )
+    codes = CONDITION_GROUPS[group]
+    if codes is None:
+        return df
+    if "condition" not in df.columns:
+        raise ValueError("Kolom `condition` tidak ada di predictions.csv")
+    return df[df["condition"].isin(codes)]
+
+
 def _combined_label(system: str, scenario: str, labels: bool = True) -> str:
     khusus = {
         ("dtw", "closed_recording"): "DTW Closed Recording",
@@ -148,6 +182,47 @@ def overall_accuracy(df: pd.DataFrame, labels: bool = True) -> pd.DataFrame:
     table["average"] = table[rata_rata].mean(axis=1) if rata_rata else np.nan
     table = table.rename(columns={"average": "Rata-rata"})
     return _rename_axis(table, labels)
+
+
+# --- Akurasi per Kondisi (Normal vs Variasi) ---
+
+def accuracy_per_condition(df: pd.DataFrame, labels: bool = True) -> pd.DataFrame:
+    """Akurasi (%) per sistem x skenario untuk tiap kondisi dan kelompok kondisi.    """
+    if "condition" not in df.columns:
+        raise ValueError("Kolom `condition` tidak ada di predictions.csv")
+
+    per_kode = df.pivot_table(
+        index=["system", "scenario"], columns="condition", values="correct", aggfunc="mean"
+    )
+    kode = [c for c in CONDITIONS if c in per_kode.columns]
+    kode += sorted(set(per_kode.columns) - set(CONDITIONS))
+    table = per_kode[kode].copy()
+
+    for group, codes in CONDITION_GROUPS.items():
+        if codes is not None and len(codes) == 1:
+            continue  # sama dengan kolom kode kondisinya
+        subset = filter_condition(df, group)
+        if subset.empty:
+            continue
+        table[group] = subset.groupby(["system", "scenario"])["correct"].mean()
+
+    order = [
+        (s, sc)
+        for s in _sorted_systems(df["system"].unique())
+        for sc in _sorted_scenarios(df["scenario"].unique())
+        if (s, sc) in table.index
+    ]
+    table = table.reindex(pd.MultiIndex.from_tuples(order, names=["system", "scenario"])) * 100
+
+    if labels:
+        table.index = table.index.map(
+            lambda x: (_system_label(x[0], True), _scenario_label(x[1], True))
+        )
+        table.index.names = ["Sistem", "Skenario"]
+        table.columns = [
+            CONDITION_LABELS.get(c, CONDITION_GROUP_LABELS.get(c, c)) for c in table.columns
+        ]
+    return table
 
 
 # --- Tabel 1: Akurasi per Vowel ---
@@ -195,7 +270,6 @@ def accuracy_per_vowel_detail(df: pd.DataFrame, labels: bool = True) -> pd.DataF
 
 
 # --- Tabel 2 & 3: Akurasi per Speaker ---
-
 def accuracy_per_speaker(df: pd.DataFrame, labels: bool = True) -> pd.DataFrame:
     """Detail data dan akurasi (%) per speaker, skenario, dan sistem."""
     if "speaker" not in df.columns:
@@ -322,18 +396,8 @@ def all_confusion_matrices(df: pd.DataFrame, normalize: bool = False) -> Dict[tu
 
 # --- Export Evaluasi ---
 
-def evaluate_all(
-    df: Optional[pd.DataFrame] = None,
-    predictions_path: str | Path = "results/predictions.csv",
-    out_dir: str | Path = "results/evaluation",
-    save: bool = True,
-) -> Dict[str, object]:
-    """Hitung semua evaluasi dan simpan ke file CSV."""
-    if df is None:
-        df = load_predictions(predictions_path)
-    if df.empty:
-        raise ValueError("Tidak ada prediksi untuk dievaluasi")
-
+def _evaluate_subset(df: pd.DataFrame, out: Optional[Path]) -> Dict[str, object]:
+    """Hitung semua tabel untuk satu subset prediksi; simpan ke `out` bila diberikan."""
     ringkasan = overall_accuracy(df, labels=True)
     table1 = accuracy_per_vowel(df, labels=True)
     table1_detail = accuracy_per_vowel_detail(df, labels=True)
@@ -342,8 +406,7 @@ def evaluate_all(
     table_detail = accuracy_per_speaker(df, labels=True)
     matrices = all_confusion_matrices(df)
 
-    if save:
-        out = Path(out_dir)
+    if out is not None:
         out.mkdir(parents=True, exist_ok=True)
         ringkasan.to_csv(out / "table_overall.csv")
         table1.to_csv(out / "table1_per_vowel.csv")
@@ -376,6 +439,41 @@ def evaluate_all(
     }
 
 
+def evaluate_all(
+    df: Optional[pd.DataFrame] = None,
+    predictions_path: str | Path = "results/predictions.csv",
+    out_dir: str | Path = "results/evaluation",
+    save: bool = True,
+) -> Dict[str, object]:
+    """Hitung semua evaluasi, terpisah per kelompok kondisi, dan simpan ke CSV."""
+    if df is None:
+        df = load_predictions(predictions_path)
+    if df.empty:
+        raise ValueError("Tidak ada prediksi untuk dievaluasi")
+
+    out = Path(out_dir) if save else None
+
+    if "condition" not in df.columns:
+        hasil = _evaluate_subset(df, out)
+        hasil["kelompok"] = {"all": dict(hasil)}
+        hasil["per_kondisi"] = pd.DataFrame()
+        return hasil
+
+    kelompok = {}
+    for group in CONDITION_GROUPS:
+        subset = filter_condition(df, group)
+        if subset.empty:
+            continue
+        kelompok[group] = _evaluate_subset(subset, out / group if out else None)
+
+    per_kondisi = accuracy_per_condition(df, labels=True)
+    if out is not None:
+        per_kondisi.to_csv(out / "table_per_condition.csv")
+
+    utama = kelompok.get("normal") or kelompok["all"]
+    return {**utama, "kelompok": kelompok, "per_kondisi": per_kondisi}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Hitung akurasi dan confusion matrix.")
     parser.add_argument("--predictions", default="results/predictions.csv",
@@ -390,8 +488,15 @@ def main() -> None:
         out_dir=args.out,
         save=not args.no_save,
     )
-    print("Ringkasan akurasi keseluruhan (%)")
-    print(hasil["ringkasan"].round(2).to_string())
+    for group, sub in hasil["kelompok"].items():
+        print(f"Ringkasan akurasi - {CONDITION_GROUP_LABELS.get(group, group)} (%)")
+        print(sub["ringkasan"].round(2).to_string())
+        print()
+    if not hasil["per_kondisi"].empty:
+        print("Akurasi per kondisi (%)")
+        print(hasil["per_kondisi"].round(2).to_string())
+        print()
+    print("=== Tabel berikut untuk kondisi Normal ===")
     print("\nTabel 1. Akurasi per vowel (%)")
     print(hasil["table1"].round(2).to_string())
     print("\nTabel 2. Closed experiments per speaker (%)")
