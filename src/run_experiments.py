@@ -5,12 +5,13 @@ Alur run_all():
     dari data/template) -> run_scenario untuk tiap skenario -> results/predictions.csv
 
 Pemakaian:
-    python -m src.run_experiments --use-stubs          # sebelum kode P1-P3 siap
-    python -m src.run_experiments                      # pakai kode asli P1-P3
+    python -m src.run_experiments
     python -m src.run_experiments --scenarios closed_speaker --systems gaussian
+    python -m src.run_experiments --scenarios closed_recording closed_speaker open loso --systems dtw gaussian dtw_nn
 
-Kontrak fungsi yang dipanggil dari P1-P3 (lihat juga src/_stubs.py):
-    src.features.extract_mfcc39(path) -> (T, 39)
+Fungsi P1-P3 yang dipanggil:
+    src.preprocessing.load_audio(path, sample_rate) -> (signal, sample_rate)
+    src.features.extract_mfcc_39(signal, sample_rate, ...) -> (T, 39)
     src.template.build_averaged_template(list_of_(T_i, 39)) -> (T, 39)
     src.dtw.dtw_distance(X, Y) -> float
     src.gaussian.fit_gaussian(list_of_(T_i, 39)) -> model
@@ -29,7 +30,12 @@ from types import SimpleNamespace
 import pandas as pd
 import soundfile as sf
 
+from src.dtw import dtw_distance
+from src.features import extract_mfcc_39
+from src.gaussian import fit_gaussian, nll
+from src.preprocessing import load_audio
 from src.recognize import recognize_dtw, recognize_dtw_nn, recognize_gaussian
+from src.template import build_averaged_template
 
 VOWELS = ["A", "I", "U", "E", "O"]
 SCENARIO_DIRS = {
@@ -48,28 +54,22 @@ FILENAME_RE = re.compile(r"^(?P<speaker>[A-Za-z0-9]+)_(?P<vowel>[AIUEO])_(?P<usa
 EXPECTED_SAMPLE_RATE = 16000
 MAX_DURATION = 10.0  # detik; rekaman lebih panjang hampir pasti belum dipotong per vowel
 
+# Konfigurasi MFCC, sama dengan main.ipynb
+WINLEN = 0.025
+WINSTEP = 0.010
+NUM_CEP = 13
+N_FFT = 512
 
-def load_backend(use_stubs=False):
-    """Ambil fungsi MFCC, template, DTW, dan Gaussian dari P1-P3 (atau stub sementara)."""
-    if use_stubs:
-        from src import _stubs as s
 
-        return SimpleNamespace(name="stubs", extract=s.extract_mfcc39, build_template=s.build_averaged_template,
-                               dtw=s.dtw_distance, fit_gaussian=s.fit_gaussian, nll=s.nll)
-    try:
-        from src.dtw import dtw_distance
-        from src.features import extract_mfcc_39
-        from src.gaussian import fit_gaussian, nll
-        from src.preprocessing import load_audio
-        from src.template import build_averaged_template
-    except ImportError as e:
-        raise ImportError(f"Kode P1-P3 belum lengkap ({e}). Untuk sementara jalankan dengan --use-stubs.") from e
-    def extract_mfcc39(path):
-        # konfigurasi sama dengan main.ipynb: WINLEN=0.025, WINSTEP=0.010, NUM_CEP=13, N_FFT=512
-        signal, sample_rate = load_audio(path, EXPECTED_SAMPLE_RATE)
-        return extract_mfcc_39(signal, sample_rate, 0.025, 0.010, 13, 512)
+def extract_mfcc39(path):
+    """Preprocessing (P1) lalu MFCC 39 dimensi (P1) untuk satu file."""
+    signal, sample_rate = load_audio(path, EXPECTED_SAMPLE_RATE)
+    return extract_mfcc_39(signal, sample_rate, WINLEN, WINSTEP, NUM_CEP, N_FFT)
 
-    return SimpleNamespace(name="p1-p3", extract=extract_mfcc39, build_template=build_averaged_template,
+
+def load_backend():
+    """Kumpulkan fungsi P1-P3 yang dipakai recognition."""
+    return SimpleNamespace(extract=extract_mfcc39, build_template=build_averaged_template,
                            dtw=dtw_distance, fit_gaussian=fit_gaussian, nll=nll)
 
 
@@ -232,11 +232,11 @@ def run_scenario(scenario, df, feats, trained, backend):
     return pd.DataFrame(rows)
 
 
-def run_all(data_dir="data", out_dir="results", scenarios=None, systems=None, use_stubs=False, strict=True):
+def run_all(data_dir="data", out_dir="results", scenarios=None, systems=None, strict=True):
     """Superset: jalankan seluruh pipeline pengujian dan simpan hasilnya."""
     scenarios = list(scenarios or DEFAULT_SCENARIOS)
     systems = list(systems or DEFAULT_SYSTEMS)
-    backend = load_backend(use_stubs)
+    backend = load_backend()
     timing = {}
 
     t = time.perf_counter()
@@ -271,8 +271,8 @@ def run_all(data_dir="data", out_dir="results", scenarios=None, systems=None, us
     results.to_csv(out / "predictions.csv", index=False)
     run_info = {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
-        "backend": backend.name,
         "data_dir": str(data_dir),
+        "mfcc": {"winlen": WINLEN, "winstep": WINSTEP, "num_cep": NUM_CEP, "n_fft": N_FFT},
         "scenarios": scenarios,
         "skipped_scenarios": skipped,
         "systems": systems,
@@ -285,7 +285,7 @@ def run_all(data_dir="data", out_dir="results", scenarios=None, systems=None, us
 
     if not results.empty:
         quick = results.pivot_table(index="scenario", columns="system", values="correct", aggfunc="mean") * 100
-        print(f"\nCek cepat akurasi (%), backend={backend.name}; tabel resmi dihitung P5 dari predictions.csv:")
+        print("\nCek cepat akurasi (%); tabel resmi dihitung P5 dari predictions.csv:")
         print(quick.reindex([s for s in TEST_SCENARIOS if s in quick.index]).round(1).to_string())
     print(f"\nHasil disimpan di {out / 'predictions.csv'} dan {out / 'run_info.json'}")
     return results
@@ -297,10 +297,9 @@ def main():
     parser.add_argument("--out", default="results", help="folder output (default: results)")
     parser.add_argument("--scenarios", nargs="+", choices=TEST_SCENARIOS, default=DEFAULT_SCENARIOS)
     parser.add_argument("--systems", nargs="+", choices=SYSTEMS, default=DEFAULT_SYSTEMS)
-    parser.add_argument("--use-stubs", action="store_true", help="pakai implementasi sementara src/_stubs.py")
     parser.add_argument("--no-strict", action="store_true", help="error pengecekan data jadi peringatan saja")
     args = parser.parse_args()
-    run_all(args.data, args.out, args.scenarios, args.systems, args.use_stubs, strict=not args.no_strict)
+    run_all(args.data, args.out, args.scenarios, args.systems, strict=not args.no_strict)
 
 
 if __name__ == "__main__":
