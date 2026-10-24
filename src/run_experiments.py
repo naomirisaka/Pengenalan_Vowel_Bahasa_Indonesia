@@ -30,7 +30,7 @@ SYSTEMS = ["dtw", "gaussian", "dtw_nn"]
 DEFAULT_SYSTEMS = ["dtw", "gaussian"]
 
 
-FILENAME_RE = re.compile(r"^(?P<speaker>[A-Za-z0-9]+)_(?P<vowel>[AIUEO])_(?P<usage>CR|CS|OS)_(?P<condition>[A-Za-z]+)\.wav$", re.IGNORECASE)
+FILENAME_RE = re.compile(r"^(?P<speaker>[A-Za-z0-9]+(?:_[A-Za-z0-9]+)?)_(?P<vowel>[AIUEO])_(?P<usage>CR|CS|OS)_(?P<condition>[A-Za-z]+)\.wav$", re.IGNORECASE)
 EXPECTED_SAMPLE_RATE = 16000
 MAX_DURATION = 10.0
 
