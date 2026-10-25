@@ -149,7 +149,8 @@ def extract_all(df, extract_fn):
     return {path: by_md5[md5] for path, md5 in zip(df.path, df.md5)}
 
 
-# Input : data latih (rekaman template), fitur MFCC-nya, fungsi P1-P3, sistem yang dipakai
+
+# Input : data latih (rekaman template), fitur MFCC-nya, penggunaan fungsi lainnya, sistem yang dipakai
 # Output: model tiap vowel untuk setiap sistem (averaged template DTW, model Gaussian)
 def build_systems(train_df, feats, backend, systems=DEFAULT_SYSTEMS):
     by_vowel = {v: [feats[p] for p in train_df[train_df.vowel == v].path] for v in VOWELS}
@@ -168,7 +169,8 @@ RECOGNIZERS = {
 }
 
 
-# Input : data uji, fitur MFCC-nya, model tiap sistem, fungsi P1-P3, nama skenario
+
+# Input : data uji, fitur MFCC-nya, model tiap sistem, penggunaan fungsi lainnya, nama skenario
 # Output: hasil pengenalan setiap rekaman uji oleh setiap sistem (label asli, tebakan, skor)
 def _evaluate(test_df, feats, trained, backend, scenario):
     rows = []
@@ -194,7 +196,7 @@ def _evaluate(test_df, feats, trained, backend, scenario):
     return rows
 
 
-# Input : nama skenario uji, tabel dataset, fitur MFCC, model tiap sistem, fungsi P1-P3
+# Input : nama skenario uji, tabel dataset, fitur MFCC, model tiap sistem, penggunaan fungsi lainnya
 # Output: tabel hasil pengenalan untuk skenario tersebut
 def run_scenario(scenario, df, feats, trained, backend):
     if scenario == "loso":
@@ -262,7 +264,7 @@ def run_all(data_dir="data", out_dir="results", scenarios=None, systems=None, st
 
     if not results.empty:
         quick = results.pivot_table(index="scenario", columns="system", values="correct", aggfunc="mean") * 100
-        print("\nCek cepat akurasi (%); tabel resmi dihitung P5 dari predictions.csv:")
+        print("\nCek cepat akurasi (%); tabel resmi dihitung dari predictions.csv:")
         print(quick.reindex([s for s in TEST_SCENARIOS if s in quick.index]).round(1).to_string())
     print(f"\nHasil disimpan di {out / 'predictions.csv'} dan {out / 'run_info.json'}")
     return results
