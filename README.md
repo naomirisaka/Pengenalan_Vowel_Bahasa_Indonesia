@@ -3,7 +3,7 @@
 Praktikum **IF4071 Pemrosesan Ucapan** untuk mengenali lima vowel bahasa Indonesia **A, I, U, E, O** dari rekaman audio. Dua pendekatan sistem pengenal ucapan (ASR) diimplementasikan dan dibandingkan:
 
 1. **DTW (Dynamic Time Warping)** dengan *averaged template* per vowel.
-2. **Model Gaussian** dengan mean dan full covariance per vowel, diskor menggunakan *negative log-likelihood* (NLL).
+2. **Model Gaussian** dengan mean dan covariance per vowel (covariance penuh yang disusutkan ke diagonalnya dengan *shrinkage* 0,6), diskor menggunakan *negative log-likelihood* (NLL).
 
 **Kelompok 7**
 
@@ -19,7 +19,7 @@ Praktikum **IF4071 Pemrosesan Ucapan** untuk mengenali lima vowel bahasa Indones
 
 - [Ringkasan Metode](#ringkasan-metode)
 - [Dataset](#dataset)
-- [Struktur Direktori](#struktur-direktori)
+- [Struktur Repository](#struktur-repository)
 - [Instalasi](#instalasi)
 - [Menjalankan Eksperimen](#menjalankan-eksperimen)
 - [Evaluasi](#evaluasi)
@@ -68,14 +68,14 @@ Kedua sistem menggunakan prinsip jarak/ketidakmiripan minimum (*minimum cost/NLL
 
 ## Dataset
 
-Korpus data terdiri atas 5 speaker (**S01–S05**) dan 5 vowel (**A, I, U, E, O**).
+Korpus data terdiri atas 5 speaker kelompok sendiri (**S01–S05**), 11 speaker open dari kelompok lain, dan 5 vowel (**A, I, U, E, O**). Total 230 berkas atau 205 rekaman unik, karena rekaman template juga disalin sebagai closed recording.
 
 | Skenario | Lokasi | Jumlah File | Keterangan |
 |---|---|---:|---|
 | Template (latih) | `data/template/` | 25 | 5 speaker × 5 vowel, kondisi `CR_N` |
 | Closed recording | `data/test/closed/recording/` | 25 | Rekaman yang sama dengan template |
-| Closed speaker | `data/test/closed/speaker/` | 125 | Speaker template dengan variasi kondisi rekaman |
-| Open speaker | `data/test/open/` | - | Rekaman speaker dari kelompok lain |
+| Closed speaker | `data/test/closed/speaker/` | 125 | Speaker template dengan 5 variasi kondisi rekaman (25 per kondisi) |
+| Open speaker | `data/test/open/` | 55 | 11 speaker dari Kelompok lain, seluruhnya kondisi `N` |
 
 Kondisi rekaman:
 
@@ -90,10 +90,11 @@ Kondisi rekaman:
 Konvensi nama file:
 
 ```text
-S{speaker}_{vowel}_{usage}_{condition}.wav
+S{speaker}_{vowel}_{usage}_{condition}.wav          # speaker kelompok sendiri
+G{kelompok}_S{speaker}_{vowel}_OS_N.wav             # speaker open dari kelompok lain
 ```
 
-Contoh: `S01_A_CS_HP.wav`.
+Contoh: `S01_A_CS_HP.wav` dan `G03_S01_A_OS_N.wav` (speaker S01 dari Kelompok 3). Awalan kelompok membedakan speaker open dari speaker template yang sama-sama bernomor `S01`–`S05`.
 
 - `usage`: `CR` (*closed recording*), `CS` (*closed speaker*), `OS` (*open speaker*).
 - Format audio: WAV, 16 kHz, mono, durasi sekitar 2–3 detik per file.
@@ -201,12 +202,23 @@ Setelah hasil prediksi tersedia di `results/predictions.csv`, jalankan modul eva
 python -m src.evaluate
 ```
 
-Program akan menghitung dan menampilkan tabel hasil evaluasi di terminal serta menyimpannya ke folder `results/evaluation/`:
+Program akan menghitung dan menampilkan tabel hasil evaluasi di terminal serta menyimpannya ke folder `results/evaluation/`.
+
+Spesifikasi praktikum hanya meminta rekaman kondisi normal (`N`), sedangkan variasi pitch (`HP`, `LP`) dan durasi (`SD`, `LD`) adalah tambahan kelompok ini. Agar variasi tidak mencampuri hasil utama, evaluasi dihitung terpisah per kelompok kondisi:
+
+| Kelompok | Kondisi | Folder output |
+|---|---|---|
+| Normal | `N` | `results/evaluation/normal/` |
+| Variasi pitch | `HP`, `LP` | `results/evaluation/pitch/` |
+| Variasi durasi | `SD`, `LD` | `results/evaluation/duration/` |
+| Overall | semua kondisi | `results/evaluation/all/` |
+
+Tabel di terminal dan tabel utama (Ringkasan, Tabel 1–3, confusion matrix) memakai kondisi normal. Perbandingan akurasi antar kondisi ada di `results/evaluation/table_per_condition.csv`. Isi tiap folder kelompok:
 
 - **Ringkasan Akurasi Keseluruhan (%)**: Akurasi tiap sistem pada skenario closed recording, closed speakers, open speakers, dan nilai rata-ratanya.
 - **Tabel 1: Akurasi per Vowel (%)**: Akurasi setiap vowel (**A, I, U, E, O**) untuk masing-masing sistem dan skenario, dilengkapi baris `Average Accuracy`.
 - **Tabel 2: Closed Experiments per Speaker (%)**: Akurasi per speaker (**S01–S05**) pada closed recording dan closed speakers untuk sistem DTW dan Gaussian, dilengkapi kolom dan baris `Average`.
-- **Tabel 3: Open Experiments per Speaker (%)**: Akurasi per speaker untuk pengujian open speaker untuk `DTW Open` dan `Gaussian Open`, dilengkapi kolom dan baris `Average`.
+- **Tabel 3: Open Experiments per Speaker (%)**: Akurasi per speaker open (misalnya `G03_S01`) untuk `DTW Open` dan `Gaussian Open`, dilengkapi kolom dan baris `Average`.
 - **Confusion Matrix**: Matriks konfusi aktual vs prediksi untuk setiap kombinasi sistem dan skenario (disimpan dalam bentuk mentah dan ternormalisasi persen).
 
 Rumus perhitungan akurasi:
@@ -239,10 +251,11 @@ File hasil prediksi rekaman uji per baris (file uji × sistem):
 
 ### `results/evaluation/`
 
-File keluaran tabel dalam format CSV untuk analisis dan penyusunan laporan:
+File keluaran tabel dalam format CSV untuk analisis dan penyusunan laporan. `table_per_condition.csv` berada langsung di `results/evaluation/`, sedangkan file lain di bawah ini dibuat di setiap folder kelompok kondisi (`normal/`, `pitch/`, `duration/`, `all/`). Tabel 3 hanya dibuat pada kelompok yang memiliki data open (`normal/` dan `all/`).
 
 | File | Isi |
 |---|---|
+| `table_per_condition.csv` | Akurasi per sistem × skenario untuk setiap kondisi (`N`, `HP`, `LP`, `SD`, `LD`), kelompok pitch, durasi, dan overall |
 | `table_overall.csv` | Ringkasan: akurasi per sistem × skenario beserta rata-ratanya |
 | `table1_per_vowel.csv` | Tabel 1: akurasi per vowel (format matrix) |
 | `table1_per_vowel_detail.csv` | Tabel 1 versi long: rincian jumlah data dan akurasi per vowel |
@@ -263,10 +276,11 @@ File `main.ipynb` memuat demonstrasi alur eksperimen yang terstruktur dari awal 
 5. Pembentukan dan inspeksi averaged template DTW;
 6. Implementasi dan evaluasi sistem DTW;
 7. Implementasi dan evaluasi Model Gaussian;
-8. Pengujian sistem pada ketiga skenario pengujian;
-9. Perhitungan Ringkasan Akurasi, Tabel 1, Tabel 2, dan Tabel 3;
-10. Visualisasi Confusion Matrix dengan heatmap interaktif;
-11. Penyimpanan dan export seluruh tabel hasil evaluasi ke CSV.
+8. Pengujian sistem pada ketiga skenario pengujian, termasuk varian DTW tanpa *averaged template* sebagai pembanding;
+9. Perhitungan Ringkasan Akurasi, Tabel 1, Tabel 2, dan Tabel 3 pada kondisi normal;
+10. Visualisasi Confusion Matrix per sistem dan skenario;
+11. Perbandingan akurasi kondisi normal, variasi pitch, dan variasi durasi, termasuk rincian per vowel dan per speaker;
+12. Penyimpanan dan export seluruh tabel hasil evaluasi ke CSV.
 
 Jalankan notebook dari direktori root repository agar path `data/` dan `src/` terbaca dengan benar:
 
